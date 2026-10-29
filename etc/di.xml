@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!--
+    Copyright © 2026 Roman Pasichnyk
+    SPDX-License-Identifier: OSL-3.0 OR AFL-3.0
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!-- The webhook, handled now or from the queue (Zero Checkout > Payment Webhooks). -->
+    <type name="Zero\Checkout\Model\RedirectPayment\Webhooks">
+        <arguments>
+            <argument name="handlers" xsi:type="array">
+                <item name="zero_stripe_checkout" xsi:type="object">Zero\Stripe\Model\Checkout\OrderUpdater</item>
+            </argument>
+        </arguments>
+    </type>
+</config>

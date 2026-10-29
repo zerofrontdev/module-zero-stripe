@@ -1,0 +1,4 @@
+"Stripe is not answering. Please try again in a minute.","Stripe не відповідає. Спробуйте ще раз за хвилину."
+"The Stripe payment was not completed (the checkout expired or was cancelled).","Оплату через Stripe не завершено (час вийшов або її скасовано)."
+"Stripe couldn't start the payment: %1","Stripe не зміг почати оплату: %1"
+"This order has no Stripe payment.","Для цього замовлення немає оплати через Stripe."

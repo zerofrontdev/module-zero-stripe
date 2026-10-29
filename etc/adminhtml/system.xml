@@ -54,6 +54,40 @@
                     <frontend_class>validate-number</frontend_class>
                 </field>
             </group>
+            <group id="zero_stripe_checkout" translate="label comment" type="text" sortOrder="27" showInDefault="1" showInWebsite="1" showInStore="1">
+                <label>Stripe Checkout: Pay Later, Wallets and Local Methods</label>
+                <comment>The customer pays on Stripe's page with any method switched on in the Stripe Dashboard for the order's currency and country: Afterpay/Clearpay, Affirm, Klarna, Cash App Pay, Link, iDEAL, Bancontact, SEPA, Przelewy24, BLIK and cards. Uses the keys and Test Mode of Credit Card (Stripe) above.</comment>
+                <field id="active" translate="label" type="select" sortOrder="1" showInDefault="1" showInWebsite="1" canRestore="1">
+                    <label>Enabled</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="title" translate="label" type="text" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="1" canRestore="1">
+                    <label>Title</label>
+                </field>
+                <field id="hold" translate="label comment" type="select" sortOrder="20" showInDefault="1" showInWebsite="1" canRestore="1">
+                    <label>Hold Until Invoiced</label>
+                    <comment>Yes: the payment is authorized and taken with an invoice (Capture Online); cancelling releases it. Methods that can't be held aren't offered. No: paid at once.</comment>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="webhook_secret" translate="label comment" type="obscure" sortOrder="30" showInDefault="1" showInWebsite="1">
+                    <label>Webhook Signing Secret</label>
+                    <comment>whsec_… of a Stripe webhook to https://your-store/zero_stripe/checkout/webhook with the checkout.session.* events. Orders are also updated when the customer comes back.</comment>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                </field>
+                <field id="allowspecific" translate="label" type="allowspecific" sortOrder="50" showInDefault="1" showInWebsite="1" canRestore="1">
+                    <label>Payment from Applicable Countries</label>
+                    <source_model>Magento\Payment\Model\Config\Source\Allspecificcountries</source_model>
+                </field>
+                <field id="specificcountry" translate="label" type="multiselect" sortOrder="51" showInDefault="1" showInWebsite="1">
+                    <label>Payment from Specific Countries</label>
+                    <source_model>Magento\Directory\Model\Config\Source\Country</source_model>
+                    <can_be_empty>1</can_be_empty>
+                </field>
+                <field id="sort_order" translate="label" type="text" sortOrder="100" showInDefault="1" showInWebsite="1">
+                    <label>Sort Order</label>
+                    <frontend_class>validate-number</frontend_class>
+                </field>
+            </group>
         </section>
     </system>
 </config>

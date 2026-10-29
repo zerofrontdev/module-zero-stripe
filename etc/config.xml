@@ -18,6 +18,19 @@
                 <allowspecific>0</allowspecific>
                 <group>offline</group>
             </zero_stripe>
+            <!-- Stripe Checkout: payment_action "order", so Payment::place() calls initialize() (the Checkout Session). -->
+            <zero_stripe_checkout>
+                <active>0</active>
+                <model>Zero\Stripe\Model\Checkout\Payment</model>
+                <title>Pay Later, Wallets and More (Stripe)</title>
+                <hold>0</hold>
+                <webhook_secret backend_model="Magento\Config\Model\Config\Backend\Encrypted"/>
+                <order_status>pending_payment</order_status>
+                <payment_action>order</payment_action>
+                <allowspecific>0</allowspecific>
+                <sort_order>27</sort_order>
+                <group>offline</group>
+            </zero_stripe_checkout>
         </payment>
     </default>
 </config>

@@ -25,6 +25,7 @@ use Stripe\PaymentIntent;
 use Zero\Stripe\Controller\Standard\Intent;
 use Zero\Stripe\Model\Config;
 use Zero\Stripe\Model\PaymentIntentGateway;
+use Zero\Stripe\Model\QuoteIntent;
 
 /**
  * The intent endpoint sizes the PaymentIntent from the quote and stamps
@@ -155,9 +156,8 @@ class IntentTest extends TestCase
             $this->request,
             $resultFactory,
             $session,
-            $this->config,
             $this->formKeyValidator,
-            $this->gateway
+            new QuoteIntent($this->config, $this->gateway)
         );
     }
 }

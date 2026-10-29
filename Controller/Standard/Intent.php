@@ -15,10 +15,9 @@ use Magento\Framework\App\Request\InvalidRequestException;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\Controller\Result\Json;
 use Magento\Framework\Controller\ResultFactory;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Data\Form\FormKey\Validator as FormKeyValidator;
-use Stripe\Exception\ApiErrorException;
-use Zero\Stripe\Model\Config;
-use Zero\Stripe\Model\PaymentIntentGateway;
+use Zero\Stripe\Model\QuoteIntent;
 
 /**
  * POST endpoint web/js/checkout-stripe.js calls (on mount and again right before
@@ -34,9 +33,8 @@ class Intent implements HttpPostActionInterface, CsrfAwareActionInterface
         private readonly RequestInterface $request,
         private readonly ResultFactory $resultFactory,
         private readonly CheckoutSession $checkoutSession,
-        private readonly Config $stripeConfig,
         private readonly FormKeyValidator $formKeyValidator,
-        private readonly PaymentIntentGateway $paymentIntentGateway
+        private readonly QuoteIntent $quoteIntent
     ) {
     }
 
@@ -74,45 +72,10 @@ class Intent implements HttpPostActionInterface, CsrfAwareActionInterface
             }
         }
 
-        if ((float) $quote->getGrandTotal() <= 0.0) {
-            return $result->setHttpResponseCode(400)->setData(['error' => (string) __('Your cart is empty.')]);
-        }
-
-        $storeId = (int) $quote->getStoreId();
-        $secretKey = $this->stripeConfig->getSecretKey($storeId);
-        if ($secretKey === '') {
-            return $result->setHttpResponseCode(400)->setData(['error' => (string) __('Card payment is not available right now.')]);
-        }
-
-        $amount = (int) round(((float) $quote->getGrandTotal()) * 100);
-        $currency = strtolower((string) $quote->getQuoteCurrencyCode());
-
-        $payment = $quote->getPayment();
-        $existingIntentId = (string) $payment->getAdditionalInformation('stripe_payment_intent_id');
-
         try {
-            if ($existingIntentId !== '') {
-                // metadata.quote_id on update too, so older intents get bound to their quote
-                // (capture() rejects intents made for another quote).
-                $intent = $this->paymentIntentGateway->update($secretKey, $existingIntentId, [
-                    'amount' => $amount,
-                    'currency' => $currency,
-                    'metadata' => ['quote_id' => (string) $quote->getId()],
-                ]);
-            } else {
-                // Card only, like Braintree's form — automatic_payment_methods would add tabs
-                // for every wallet/BNPL method enabled in the Stripe Dashboard.
-                $intent = $this->paymentIntentGateway->create($secretKey, [
-                    'amount' => $amount,
-                    'currency' => $currency,
-                    'payment_method_types' => ['card'],
-                    'metadata' => ['quote_id' => (string) $quote->getId()],
-                ]);
-                $payment->setAdditionalInformation('stripe_payment_intent_id', $intent->id);
-                $payment->save();
-            }
-        } catch (ApiErrorException $e) {
-            return $result->setHttpResponseCode(400)->setData(['error' => (string) __('Could not start card payment. Please try again.')]);
+            $intent = $this->quoteIntent->forQuote($quote);
+        } catch (LocalizedException $e) {
+            return $result->setHttpResponseCode(400)->setData(['error' => $e->getMessage()]);
         }
 
         return $result->setData(['client_secret' => $intent->client_secret]);

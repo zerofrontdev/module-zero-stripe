@@ -1,6 +1,18 @@
 # Zero_Stripe
 
-Zero for Magento Open Source: Stripe cards and wallets (Payment Element) for Zero Checkout.
+Stripe for Zero Checkout, two methods:
+
+- **Credit Card (Stripe)** `zero_stripe`: Stripe's Payment Element in the
+  checkout, a PaymentIntent sized to the cart, captured when the order is
+  placed (`Model\Standard`, `Controller\Standard\Intent`).
+- **Pay Later, Wallets and More (Stripe)** `zero_stripe_checkout`: Stripe
+  Checkout, the hosted page with every method enabled in the Stripe
+  Dashboard; the order waits in pending payment until the customer is back
+  or the webhook arrives (`Model\Checkout\*`, `Controller\Checkout\*`).
+
+Settings: Stores > Configuration > Sales > Payment Methods > Stripe. Keys per
+mode (test/live), an optional hold (authorize now, capture on invoice) and
+the webhook secret for Stripe Checkout.
 
 ## Install
 

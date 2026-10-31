@@ -23,13 +23,15 @@ use PHPUnit\Framework\TestCase;
 use Stripe\Exception\InvalidRequestException;
 use Stripe\PaymentIntent;
 use Zero\Stripe\Controller\Standard\Intent;
+use Psr\Log\LoggerInterface;
 use Zero\Stripe\Model\Config;
+use Zero\Stripe\Model\IntentOrders;
 use Zero\Stripe\Model\PaymentIntentGateway;
 use Zero\Stripe\Model\QuoteIntent;
 
 /**
  * The intent endpoint sizes the PaymentIntent from the quote and stamps
- * metadata.quote_id, which capture() later requires.
+ * metadata.quote_id, which authorize() later requires; intents are manual capture.
  */
 #[AllowMockObjectsWithoutExpectations]
 class IntentTest extends TestCase
@@ -86,8 +88,9 @@ class IntentTest extends TestCase
         $this->gateway->expects($this->once())->method('create')->with('sk_test_1', [
             'amount' => 2550,
             'currency' => 'usd',
-            'payment_method_types' => ['card'],
             'metadata' => ['quote_id' => '55'],
+            'capture_method' => 'manual',
+            'payment_method_types' => ['card'],
         ])->willReturn(PaymentIntent::constructFrom(['id' => 'pi_new', 'client_secret' => 'secret_1']));
         $this->gateway->expects($this->never())->method('update');
         $this->payment->expects($this->once())->method('save');
@@ -102,10 +105,14 @@ class IntentTest extends TestCase
     {
         $this->quote->method('getGrandTotal')->willReturn(30.0);
         $this->payment->setAdditionalInformation('stripe_payment_intent_id', 'pi_old');
+        $this->gateway->method('retrieve')->willReturn(
+            PaymentIntent::constructFrom(['id' => 'pi_old', 'status' => 'requires_payment_method'])
+        );
         $this->gateway->expects($this->once())->method('update')->with('sk_test_1', 'pi_old', [
             'amount' => 3000,
             'currency' => 'usd',
             'metadata' => ['quote_id' => '55'],
+            'capture_method' => 'manual',
         ])->willReturn(PaymentIntent::constructFrom(['id' => 'pi_old', 'client_secret' => 'secret_2']));
         $this->gateway->expects($this->never())->method('create');
 
@@ -157,7 +164,12 @@ class IntentTest extends TestCase
             $resultFactory,
             $session,
             $this->formKeyValidator,
-            new QuoteIntent($this->config, $this->gateway)
+            new QuoteIntent(
+                $this->config,
+                $this->gateway,
+                $this->createStub(LoggerInterface::class),
+                $this->createStub(IntentOrders::class)
+            )
         );
     }
 }

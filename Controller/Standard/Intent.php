@@ -59,7 +59,8 @@ class Intent implements HttpPostActionInterface, CsrfAwareActionInterface
         // the quote has rates but no method, so the amount would exclude shipping and
         // capture()'s amount check would then (correctly) reject the order. Same few
         // lines as Placeorder.
-        $shippingMethod = (string) ($this->request->getParam('shipping_method') ?? '');
+        $shippingMethod = $this->request->getParam('shipping_method');
+        $shippingMethod = is_scalar($shippingMethod) ? (string) $shippingMethod : '';
         if ($shippingMethod !== '') {
             $shippingAddress = $quote->getShippingAddress();
             $rate = $shippingAddress->getShippingRateByCode($shippingMethod);

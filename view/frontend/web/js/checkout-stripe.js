@@ -3,11 +3,15 @@
  * SPDX-License-Identifier: OSL-3.0 OR AFL-3.0
  *
  * Stripe for Zero Checkout, plain JS: Payment Element and Express Checkout
- * share one `elements` and one PaymentIntent. confirmPayment() charges in the
- * browser, then the form posts the intent id for Model\Standard::capture().
- * The intent's amount is refreshed on mount and right before confirming
- * (the total can change; the client_secret stays). Not handled: off-site
- * 3-D Secure redirects.
+ * share one `elements` and one PaymentIntent. The intent is manual-capture:
+ * confirmPayment() only authorizes the card in the browser (status
+ * requires_capture), then the form posts the intent id; Model\Standard::authorize()
+ * checks it and the order captures it once saved. The intent's amount is
+ * refreshed on mount and right before confirming (the total can change; the
+ * client_secret stays). When the server hands back another intent (the old
+ * one was held by a placement that failed, or was already used), Elements are
+ * built again for it and the customer re-enters the card. Not handled:
+ * off-site 3-D Secure redirects.
  */
 (function () {
     'use strict';
@@ -30,6 +34,9 @@
     var expressMount = document.getElementById('stripe-express-checkout');
     var elements = null;
     var elementsReady = null;
+    var clientSecretInUse = null;
+    var paymentElement = null;
+    var expressCheckoutElement = null;
 
     function showError(message) {
         errorBox.textContent = message;
@@ -104,17 +111,51 @@
         }
 
         elementsReady = fetchIntent().then(function (clientSecret) {
-            elements = stripe.elements({ clientSecret: clientSecret });
-            // The account's own payment-method configuration still adds Bank/Klarna/Link
-            // tabs to a card-only intent; paymentMethodOrder: ['card'] restricts the rendered
-            // tabs (paymentMethodTypes isn't a real option here and is silently ignored).
-            var paymentElement = elements.create('payment', { paymentMethodOrder: ['card'] });
-            paymentElement.mount('#stripe-element-mount');
-            mountExpressCheckout();
+            mountElements(clientSecret);
             return elements;
         });
 
         return elementsReady;
+    }
+
+    /**
+     * Builds `elements` for one client_secret, replacing any built before.
+     *
+     * @param {string} clientSecret
+     */
+    function mountElements(clientSecret) {
+        if (paymentElement) {
+            paymentElement.destroy();
+            paymentElement = null;
+        }
+        if (expressCheckoutElement) {
+            expressCheckoutElement.destroy();
+            expressCheckoutElement = null;
+        }
+        clientSecretInUse = clientSecret;
+        elements = stripe.elements({ clientSecret: clientSecret });
+        // The account's own payment-method configuration still adds Bank/Klarna/Link
+        // tabs to a card-only intent; paymentMethodOrder: ['card'] restricts the rendered
+        // tabs (paymentMethodTypes isn't a real option here and is silently ignored).
+        paymentElement = elements.create('payment', { paymentMethodOrder: ['card'] });
+        paymentElement.mount('#stripe-element-mount');
+        mountExpressCheckout();
+    }
+
+    /**
+     * Right before confirming: resizes the intent to the live quote total. If
+     * the server answers with another intent, the card form is rebuilt for it
+     * and the confirm stops: the details typed belong to the old one.
+     *
+     * @return {Promise<void>}
+     */
+    function syncIntent() {
+        return fetchIntent().then(function (clientSecret) {
+            if (clientSecret !== clientSecretInUse) {
+                mountElements(clientSecret);
+                throw new Error('Please re-enter your card details.');
+            }
+        });
     }
 
     /**
@@ -127,7 +168,7 @@
             return;
         }
 
-        var expressCheckoutElement = elements.create('expressCheckout', {});
+        expressCheckoutElement = elements.create('expressCheckout', {});
 
         expressCheckoutElement.on('availablepaymentmethodschange', function (event) {
             var available = event && event.paymentMethods;
@@ -149,7 +190,7 @@
                         throw submitResult.error;
                     }
                     // Sync the intent amount to the live quote total right before confirming.
-                    return fetchIntent();
+                    return syncIntent();
                 })
                 .then(function () {
                     return stripe.confirmPayment({
@@ -174,7 +215,10 @@
         if (result.error) {
             throw new Error(result.error.message || 'We couldn’t process that card.');
         }
-        if (!result.paymentIntent || result.paymentIntent.status !== 'succeeded') {
+        // requires_capture: authorized, captured once the order is saved;
+        // succeeded: an intent made before manual capture.
+        var status = result.paymentIntent && result.paymentIntent.status;
+        if (status !== 'requires_capture' && status !== 'succeeded') {
             throw new Error('Your card payment was not completed. Please try again.');
         }
         intentInput.value = result.paymentIntent.id;
@@ -230,7 +274,7 @@
                     throw submitResult.error;
                 }
                 // Sync the intent amount to the live quote total right before confirming.
-                return fetchIntent();
+                return syncIntent();
             })
             .then(function () {
                 return stripe.confirmPayment({

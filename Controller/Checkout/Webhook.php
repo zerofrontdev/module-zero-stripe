@@ -29,11 +29,13 @@ use Zero\Stripe\Model\Checkout\Payment;
 /**
  * Stripe's webhook for Stripe Checkout (zero_stripe/checkout/webhook; events
  * checkout.session.completed, .async_payment_succeeded, .async_payment_failed,
- * .expired). With a Webhook Signing Secret set, the Stripe-Signature header
- * is checked; either way the event only says which order to look at: the
- * session is asked from Stripe (OrderUpdater, now or from the queue: Zero
- * Checkout > Payment Webhooks). 200 when handled or not ours; 400 for a bad
- * signature; 503 when Stripe can't be asked right now, so it sends it again.
+ * .expired). The Stripe-Signature header is checked against the store's
+ * Webhook Signing Secret; without a secret every event is refused (400), so
+ * nobody can make the store act on an unsigned call. The event only says
+ * which order to look at: the session is asked from Stripe (OrderUpdater, now
+ * or from the queue: Zero Checkout > Payment Webhooks). 200 when handled or
+ * not ours; 400 for a bad signature or no secret; 503 when Stripe can't be
+ * asked right now or the order is being updated, so it sends it again.
  */
 class Webhook implements HttpPostActionInterface, CsrfAwareActionInterface
 {
@@ -60,11 +62,13 @@ class Webhook implements HttpPostActionInterface, CsrfAwareActionInterface
         $payload = (string) $request->getContent();
         $event = json_decode($payload, true);
         $session = is_array($event) ? (array) ($event['data']['object'] ?? []) : [];
-        $type = (string) ($event['type'] ?? '');
+        // A field sent as an array or object counts as missing: not ours, never a 500.
+        $type = is_scalar($event['type'] ?? null) ? (string) $event['type'] : '';
         if (!str_starts_with($type, 'checkout.session.')) {
             return $this->otherEvent($payload, is_array($event) ? $event : [], $session, $result);
         }
-        $reference = (string) ($session['metadata']['order'] ?? $session['client_reference_id'] ?? '');
+        $reference = $session['metadata']['order'] ?? $session['client_reference_id'] ?? '';
+        $reference = is_scalar($reference) ? (string) $reference : '';
         if ($reference === '') {
             return $result->setHttpResponseCode(200);
         }
@@ -74,18 +78,11 @@ class Webhook implements HttpPostActionInterface, CsrfAwareActionInterface
         ) {
             return $result->setHttpResponseCode(200);
         }
-        $secret = $this->secret((int) $order->getStoreId());
-        if ($secret !== '') {
-            try {
-                StripeWebhook::constructEvent($payload, (string) $request->getHeader('Stripe-Signature'), $secret);
-            } catch (\Throwable $e) {
-                $this->logger->warning('Zero Stripe Checkout: webhook with a bad signature for order ' . $reference);
-
-                return $result->setHttpResponseCode(400);
-            }
+        if (!$this->verified($payload, (int) $order->getStoreId(), $reference)) {
+            return $result->setHttpResponseCode(400);
         }
         try {
-            $this->webhooks->handle($order, ['type' => (string) $event['type']]);
+            $this->webhooks->handle($order, ['type' => $type]);
         } catch (LocalizedException) {
             return $result->setHttpResponseCode(503);
         }
@@ -104,10 +101,11 @@ class Webhook implements HttpPostActionInterface, CsrfAwareActionInterface
      */
     private function otherEvent(string $payload, array $event, array $object, Raw $result): Raw
     {
-        $reference = (string) ($object['metadata']['order']
+        $reference = $object['metadata']['order']
             ?? $object['parent']['subscription_details']['metadata']['order']
             ?? $object['subscription_details']['metadata']['order']
-            ?? '');
+            ?? '';
+        $reference = is_scalar($reference) ? (string) $reference : '';
         if ($reference === '') {
             return $result->setHttpResponseCode(200);
         }
@@ -115,27 +113,43 @@ class Webhook implements HttpPostActionInterface, CsrfAwareActionInterface
         if (!$order->getId() || $order->getPayment()?->getMethod() !== Payment::CODE) {
             return $result->setHttpResponseCode(200);
         }
-        $secret = $this->secret((int) $order->getStoreId());
-        if ($secret !== '') {
-            try {
-                /** @var Http $request */
-                $request = $this->request;
-                StripeWebhook::constructEvent($payload, (string) $request->getHeader('Stripe-Signature'), $secret);
-            } catch (\Throwable) {
-                $this->logger->warning('Zero Stripe Checkout: webhook with a bad signature for order ' . $reference);
-
-                return $result->setHttpResponseCode(400);
-            }
+        if (!$this->verified($payload, (int) $order->getStoreId(), $reference)) {
+            return $result->setHttpResponseCode(400);
         }
         try {
             $this->eventManager->dispatch('zero_stripe_webhook', ['stripe_event' => $event, 'order' => $order]);
         } catch (LocalizedException $e) {
-            $this->logger->warning('Zero Stripe Checkout: ' . ($event['type'] ?? '') . ' for order ' . $reference . ': ' . $e->getMessage());
+            $this->logger->warning('Zero Stripe Checkout: ' . (is_scalar($event['type'] ?? null) ? $event['type'] : '') . ' for order ' . $reference . ': ' . $e->getMessage());
 
             return $result->setHttpResponseCode(503);
         }
 
         return $result->setHttpResponseCode(200);
+    }
+
+    /**
+     * The call is signed with the store's Webhook Signing Secret; false (with
+     * a warning) when it isn't, or when no secret is set.
+     */
+    private function verified(string $payload, int $storeId, string $reference): bool
+    {
+        $secret = $this->secret($storeId);
+        if ($secret === '') {
+            $this->logger->warning('Zero Stripe Checkout: webhook for order ' . $reference . ' refused: webhook secret not set');
+
+            return false;
+        }
+        try {
+            /** @var Http $request */
+            $request = $this->request;
+            StripeWebhook::constructEvent($payload, (string) $request->getHeader('Stripe-Signature'), $secret);
+        } catch (\Throwable) {
+            $this->logger->warning('Zero Stripe Checkout: webhook with a bad signature for order ' . $reference);
+
+            return false;
+        }
+
+        return true;
     }
 
     private function secret(int $storeId): string

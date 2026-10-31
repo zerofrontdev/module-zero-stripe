@@ -113,10 +113,16 @@ class Gateway
     }
 
     /**
+     * The key (RefundKey) is the same when Magento retries the same credit
+     * memo, so Stripe replays the first refund instead of paying twice.
+     *
      * @throws ApiErrorException
      */
-    public function refund(string $secretKey, string $intentId, int $amount): Refund
+    public function refund(string $secretKey, string $intentId, int $amount, string $idempotencyKey): Refund
     {
-        return (new StripeClient($secretKey))->refunds->create(['payment_intent' => $intentId, 'amount' => $amount]);
+        return (new StripeClient($secretKey))->refunds->create(
+            ['payment_intent' => $intentId, 'amount' => $amount],
+            ['idempotency_key' => $idempotencyKey]
+        );
     }
 }

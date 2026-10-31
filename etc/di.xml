@@ -12,4 +12,16 @@
             </argument>
         </arguments>
     </type>
+    <!--
+        The recheck cron (Zero Checkout, off by default) may ask Stripe about a
+        pending Stripe Checkout order: update() never cancels an order whose
+        session is still open, only an expired or cancelled one.
+    -->
+    <type name="Zero\Checkout\Model\RedirectPayment\Updaters">
+        <arguments>
+            <argument name="updaters" xsi:type="array">
+                <item name="zero_stripe_checkout" xsi:type="object">Zero\Stripe\Model\Checkout\OrderUpdater</item>
+            </argument>
+        </arguments>
+    </type>
 </config>

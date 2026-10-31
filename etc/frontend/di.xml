@@ -11,4 +11,12 @@
             </argument>
         </arguments>
     </type>
+    <!-- The card was only authorized in the browser: capture it once the order is saved (an invoice, Capture Online). -->
+    <type name="Zero\Checkout\Controller\Checkout\Placeorder">
+        <arguments>
+            <argument name="afterPlaceOrder" xsi:type="array">
+                <item name="stripe_capture" xsi:type="object">Zero\Stripe\Model\CaptureAfterPlace</item>
+            </argument>
+        </arguments>
+    </type>
 </config>

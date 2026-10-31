@@ -3,8 +3,9 @@
     Copyright © 2026 Roman Pasichnyk
     SPDX-License-Identifier: OSL-3.0 OR AFL-3.0
 
-    Capture-only method (no initialize()): the payment is confirmed client-side
-    before the order is placed; Model\Standard::capture() verifies it.
+    Manual capture: the browser confirms (authorizes) the PaymentIntent before
+    the order is placed; Model\Standard::authorize() verifies it, and
+    Model\CaptureAfterPlace captures it once the order is saved.
 -->
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:App/etc/config.xsd">
     <default>
@@ -13,7 +14,7 @@
                 <active>0</active>
                 <model>Zero\Stripe\Model\Standard</model>
                 <order_status>processing</order_status>
-                <payment_action>authorize_capture</payment_action>
+                <payment_action>authorize</payment_action>
                 <title>Credit Card (Stripe)</title>
                 <allowspecific>0</allowspecific>
                 <group>offline</group>

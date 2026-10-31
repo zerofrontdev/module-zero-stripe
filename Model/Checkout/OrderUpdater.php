@@ -13,6 +13,8 @@ use Magento\Framework\Exception\LocalizedException;
 use Magento\Sales\Model\Order;
 use Stripe\Checkout\Session;
 use Stripe\Exception\ApiErrorException;
+use Zero\Checkout\Model\Money\MinorUnits;
+use Zero\Checkout\Model\RedirectPayment\LatePaymentInterface;
 use Zero\Checkout\Model\RedirectPayment\OrderPayment;
 use Zero\Checkout\Model\RedirectPayment\OrderUpdaterInterface;
 use Zero\Checkout\Model\RedirectPayment\ReturnResult;
@@ -28,10 +30,13 @@ use Zero\Stripe\Model\Config;
  * - processing (bank debits and other delayed methods): pending, the webhook
  *   brings the result;
  * - the session expired, or its PaymentIntent was cancelled: cancelled;
- * - the session still open (the customer came back without paying): not started.
- * Running it twice changes nothing the second time.
+ * - the session still open (the customer came back without paying): not started,
+ *   nothing changed (Back then calls abandon()).
+ * Running it twice changes nothing the second time; it never cancels an order
+ * whose session is still open, so the recheck cron (Updaters) may run it.
+ * For a cancelled order, latePayment() only reads what Stripe holds.
  */
-class OrderUpdater implements WebhookHandlerInterface, OrderUpdaterInterface
+class OrderUpdater implements WebhookHandlerInterface, OrderUpdaterInterface, LatePaymentInterface
 {
     public function __construct(
         private readonly Config $config,
@@ -70,6 +75,75 @@ class OrderUpdater implements WebhookHandlerInterface, OrderUpdaterInterface
     public function webhook(Order $order, array $data): void
     {
         $this->update($order);
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function latePayment(Order $order): ?array
+    {
+        $sessionId = (string) $order->getPayment()?->getAdditionalInformation(Payment::SESSION_ID);
+        if ($sessionId === '') {
+            return null;
+        }
+        try {
+            $session = $this->gateway->session($this->config->getSecretKey((int) $order->getStoreId()), $sessionId);
+        } catch (ApiErrorException $e) {
+            throw new LocalizedException(__('Stripe is not answering. Please try again in a minute.'), $e);
+        }
+        if ((string) $session->status !== 'complete') {
+            return null;
+        }
+        if ((string) $session->mode === 'subscription') {
+            if ((string) $session->payment_status !== 'paid') {
+                return null;
+            }
+            $id = is_object($session->subscription) ? (string) $session->subscription->id : (string) $session->subscription;
+        } else {
+            $intent = $session->payment_intent;
+            if (!is_object($intent) || !in_array((string) $intent->status, ['succeeded', 'requires_capture'], true)) {
+                return null;
+            }
+            $id = (string) $intent->id;
+        }
+        $currency = strtoupper((string) $session->currency);
+
+        return [
+            'id' => $id !== '' ? $id : $sessionId,
+            'amount' => MinorUnits::format(
+                MinorUnits::fromMinor((int) $session->amount_total, $currency, MinorUnits::STRIPE),
+                $currency,
+                MinorUnits::STRIPE
+            ),
+            'currency' => $currency,
+        ];
+    }
+
+    /**
+     * The customer came back from an open session without paying: the
+     * session is expired, so it can't be paid any more, then the order is
+     * cancelled. When Stripe won't expire it (it was completed meanwhile, or
+     * Stripe is down), nothing is cancelled and the session is asked again:
+     * that answer is the result, except that a session still open counts as
+     * UNCONFIRMED (not NOT_STARTED): it can still be paid, so the cart is not
+     * restored while the order waits for it.
+     *
+     * @return string A ReturnResult state
+     * @throws LocalizedException When Stripe doesn't answer the second time
+     */
+    public function abandon(Order $order): string
+    {
+        $sessionId = (string) $order->getPayment()?->getAdditionalInformation(Payment::SESSION_ID);
+        try {
+            $this->gateway->expire($this->config->getSecretKey((int) $order->getStoreId()), $sessionId);
+        } catch (ApiErrorException) {
+            $state = $this->update($order);
+
+            return $state === ReturnResult::NOT_STARTED ? ReturnResult::UNCONFIRMED : $state;
+        }
+        $this->orderPayment->cancel($order, (string) __('The customer came back from Stripe without paying.'));
+
+        return ReturnResult::NOT_STARTED;
     }
 
     /**

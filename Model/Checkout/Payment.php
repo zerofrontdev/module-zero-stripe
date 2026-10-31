@@ -27,6 +27,8 @@ use Magento\Store\Model\ScopeInterface;
 use Psr\Log\LoggerInterface;
 use Stripe\Exception\ApiErrorException;
 use Zero\Checkout\Controller\Checkout\Placeorder;
+use Zero\Checkout\Model\Money\MinorUnits;
+use Zero\Checkout\Model\Money\RefundKey;
 use Zero\Stripe\Model\Config;
 use Zero\Checkout\Model\RedirectPayment\ReturnUrl;
 
@@ -47,8 +49,6 @@ class Payment extends AbstractMethod
     public const CODE = 'zero_stripe_checkout';
     public const SESSION_ID = 'stripe_checkout_session_id';
     public const INTENT_ID = 'stripe_payment_intent_id';
-    /** Currencies Stripe counts in whole units (no cents). */
-    private const ZERO_DECIMAL = ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'];
 
     /**
      * @var string
@@ -268,12 +268,19 @@ class Payment extends AbstractMethod
      */
     public function refund(InfoInterface $payment, $amount)
     {
+        /** @var \Magento\Sales\Model\Order\Payment $payment */
         $order = $payment->getOrder();
+        // The order-currency amount of the credit memo; base × rate when there is none.
+        $creditmemo = $payment->getCreditmemo();
+        $orderAmount = $creditmemo !== null && $creditmemo->getGrandTotal() !== null
+            ? (float) $creditmemo->getGrandTotal()
+            : (float) $amount * (float) ($order->getBaseToOrderRate() ?: 1);
         try {
             $refund = $this->gateway->refund(
                 $this->secretKey((int) $order->getStoreId()),
                 $this->intentId($payment),
-                self::minor((float) $amount * (float) ($order->getBaseToOrderRate() ?: 1), (string) $order->getOrderCurrencyCode())
+                self::minor($orderAmount, (string) $order->getOrderCurrencyCode()),
+                RefundKey::for($payment, (float) $amount, 'zero-')
             );
         } catch (ApiErrorException $e) {
             throw new LocalizedException(__('Stripe refused the refund: %1', $e->getMessage()));
@@ -285,12 +292,13 @@ class Payment extends AbstractMethod
 
     /**
      * An amount in the currency's smallest unit, as Stripe takes it.
+     *
+     * @deprecated Use MinorUnits::toMinor($amount, $currency, MinorUnits::STRIPE); kept for callers.
+     * @see MinorUnits::toMinor()
      */
     public static function minor(float $amount, string $currency): int
     {
-        return in_array(strtoupper($currency), self::ZERO_DECIMAL, true)
-            ? (int) round($amount)
-            : (int) round($amount * 100);
+        return MinorUnits::toMinor($amount, $currency, MinorUnits::STRIPE);
     }
 
     /**
